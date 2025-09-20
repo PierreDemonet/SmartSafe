@@ -1,0 +1,6 @@
+default:
+  rho: 0.2
+ground:
+  rho: 0.25
+module:
+  rho: 0.05
