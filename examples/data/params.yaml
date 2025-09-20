@@ -1,0 +1,47 @@
+crs: "EPSG:2154"
+mode: "roof"
+site:
+  latitude: 45.75
+  longitude: 4.85
+  altitude_m: 200
+  timezone: "Europe/Paris"
+module:
+  ref: "Example-400Wp"
+  width_m: 1.134
+  height_m: 1.722
+  frame_gap_m: 0.02
+  p_stc_w: 400
+  glass_refractive_index: 1.526
+  ar_reflectance: 0.02
+  cec_params:
+    alpha_sc: 0.0045
+    a_ref: 1.5
+    I_L_ref: 8.5
+    I_o_ref: 8e-10
+    R_s: 0.4
+    R_sh_ref: 400
+    Adjust: 0
+inverter:
+  ref: "Inverter-100k"
+  p_dc_max_w: 110000
+  p_ac_nom_w: 100000
+  eff_curve:
+    - [0.05, 0.97]
+    - [0.5, 0.985]
+    - [1.0, 0.987]
+layout:
+  tilt_deg: 10
+  azimuth_deg: 180
+  aisle_m: 0.8
+  roof_setback_m: 0.6
+  ground_row_spacing_m: 4.5
+  min_edge_clearance_m: 0.3
+  portrait: true
+  string_size: 18
+  mppt_per_inverter: 10
+  dc_ac_ratio: 1.2
+losses:
+  soiling_pct: 2.0
+  dc_cable_pct: 1.5
+  ac_cable_pct: 1.0
+  availability_pct: 98.5

@@ -1,0 +1,10 @@
+modules:
+  - ref: "Example-400Wp"
+    width_m: 1.134
+    height_m: 1.722
+    frame_gap_m: 0.02
+    p_stc_w: 400
+inverters:
+  - ref: "Inverter-100k"
+    p_dc_max_w: 110000
+    p_ac_nom_w: 100000
