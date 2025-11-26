@@ -17,6 +17,7 @@ from pvai.pv.sim import SimulationOutputs, simulate_hourly
 from pvai.export.dxf import export_dxf
 from pvai.export.pdf import export_pdf
 from pvai.export.xlsx import export_bom
+from pvai.structural.diagnostic import GeometryConfig, LoadConfig, run_diagnostic
 
 try:
     from pvrtx.core.engine import PVRTX
@@ -151,6 +152,59 @@ def export(layout: Path = typer.Option(..., exists=True),
         summary = pd.Series({"modules": len(layout_gdf), "dc_capacity_kwp": len(layout_gdf) * project.module.p_stc_w / 1000.0})
         export_bom(layout_gdf, summary, xlsx)
     typer.echo("Deliverables exported.")
+
+
+@app.command()
+def diag(span: float = typer.Option(12.0, help="Portée du portique (m)"),
+         bay_spacing: float = typer.Option(6.0, help="Entraxe entre portiques (m)"),
+         length: float = typer.Option(18.0, help="Longueur totale du hangar (m)"),
+         roof_pitch: float = typer.Option(12.0, help="Pente de toiture (degrés)"),
+         roof_type: str = typer.Option("double", help="Type de toiture: double ou mono"),
+         eave_height: float = typer.Option(4.0, help="Hauteur à l'égout (m)"),
+         zone_neige: str = typer.Option("A2", help="Zone de neige (A1, A2, B1, ... )"),
+         zone_vent: int = typer.Option(1, help="Zone de vent (1,2,3)"),
+         altitude: float = typer.Option(200.0, help="Altitude du site (m)"),
+         surcharge: float = typer.Option(0.15, help="Surcharge permanente additionnelle (kN/m²)"),
+         roof_weight: float = typer.Option(0.10, help="Poids propre de la couverture (kN/m²)"),
+         rafter_section: str = typer.Option("IPE200", help="Section des arbalétriers"),
+         column_section: str = typer.Option("HEA160", help="Section des poteaux"),
+         frame_material: str = typer.Option("S275", help="Matériau principal (S275, S355, GL24)")):
+    """Diagnostic rapide GO/NO GO pour un hangar agricole standard."""
+
+    geom = GeometryConfig(
+        span_m=span,
+        bay_spacing_m=bay_spacing,
+        length_m=length,
+        roof_pitch_deg=roof_pitch,
+        roof_type=roof_type if roof_type in ("double", "mono") else "double",
+        eave_height_m=eave_height,
+    )
+    loads = LoadConfig(
+        zone_neige=zone_neige,
+        zone_vent=zone_vent,
+        altitude_m=altitude,
+        additional_permanent_kN_m2=surcharge,
+        roof_self_weight_kN_m2=roof_weight,
+    )
+
+    report = run_diagnostic(
+        geom,
+        sections={"rafter": rafter_section, "column": column_section},
+        materials={"frame": frame_material},
+        loads=loads,
+    )
+
+    typer.echo(f"Neige prise en compte: {report.snow_load_kN_m2:.2f} kN/m²")
+    typer.echo(f"Pression de vent: {report.wind_pressure_kN_m2:.2f} kN/m²")
+    typer.echo(f"Poutre - Mmax: {report.rafter.applied[0]:.2f} kN·m / MRd {report.rafter.capacity[0]:.2f} kN·m -> utilisation {report.rafter.utilization*100:.1f}%")
+    typer.echo(
+        f"Poteau - N: {report.column.applied[0]:.2f} kN, M: {report.column.applied[1]:.2f} kN·m / "
+        f"NRd {report.column.capacity[0]:.2f} kN, MRd {report.column.capacity[1]:.2f} kN·m -> utilisation {report.column.utilization*100:.1f}%"
+    )
+    typer.echo(f"Verdict: {report.status}")
+    typer.echo("Renforts suggérés:")
+    for opt in report.reinforcements:
+        typer.echo(f"- {opt}")
 
 
 if __name__ == "__main__":
