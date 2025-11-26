@@ -19,6 +19,7 @@ from pvai.export.pdf import export_pdf
 from pvai.export.xlsx import export_bom
 from pvai.structural.diagnostic import (
     BracingConfig,
+    FrameAccessories,
     GeometryConfig,
     LoadConfig,
     PurlinConfig,
@@ -168,6 +169,10 @@ def diag(span: float = typer.Option(12.0, help="Portée du portique (m)"),
          roof_pitch: float = typer.Option(12.0, help="Pente de toiture (degrés)"),
          roof_type: str = typer.Option("double", help="Type de toiture: double ou mono"),
          eave_height: float = typer.Option(4.0, help="Hauteur à l'égout (m)"),
+         intermediate_columns: int = typer.Option(0, help="Nombre de poteaux intermédiaires par portique"),
+         lean_to_span: Optional[float] = typer.Option(None, help="Largeur d'appentis (m)"),
+         lean_to_pitch: Optional[float] = typer.Option(None, help="Pente de l'appentis (degrés)"),
+         lean_to_eave: Optional[float] = typer.Option(None, help="Hauteur d'égout de l'appentis (m)"),
          zone_neige: str = typer.Option("A2", help="Zone de neige (A1, A2, B1, ... )"),
          zone_vent: int = typer.Option(1, help="Zone de vent (1,2,3)"),
          altitude: float = typer.Option(200.0, help="Altitude du site (m)"),
@@ -179,6 +184,8 @@ def diag(span: float = typer.Option(12.0, help="Portée du portique (m)"),
          purlin_section: str = typer.Option("Z200", help="Section des pannes"),
          purlin_spacing: float = typer.Option(1.5, help="Entraxe des pannes (m)"),
          bracing_section: str = typer.Option("UPN160", help="Section de contreventement"),
+         haunch: bool = typer.Option(False, help="Activer un jarret/renfort au noeud poteau-poutre"),
+         knee_braces: bool = typer.Option(False, help="Activer des bracons (knee-braces) aux poteaux"),
          pdf_report: Optional[Path] = typer.Option(None, help="Chemin du rapport PDF")):
     """Diagnostic rapide GO/NO GO pour un hangar agricole standard."""
 
@@ -189,6 +196,10 @@ def diag(span: float = typer.Option(12.0, help="Portée du portique (m)"),
         roof_pitch_deg=roof_pitch,
         roof_type=roof_type if roof_type in ("double", "mono") else "double",
         eave_height_m=eave_height,
+        intermediate_columns=intermediate_columns,
+        lean_to_span_m=lean_to_span,
+        lean_to_pitch_deg=lean_to_pitch,
+        lean_to_eave_height_m=lean_to_eave,
     )
     loads = LoadConfig(
         zone_neige=zone_neige,
@@ -199,6 +210,7 @@ def diag(span: float = typer.Option(12.0, help="Portée du portique (m)"),
     )
     purlins = PurlinConfig(section=purlin_section, spacing_m=purlin_spacing)
     bracing = BracingConfig(section=bracing_section, panel_width_m=bay_spacing)
+    accessories = FrameAccessories(haunch=haunch, knee_braces=knee_braces)
 
     report = run_diagnostic(
         geom,
@@ -207,6 +219,7 @@ def diag(span: float = typer.Option(12.0, help="Portée du portique (m)"),
         loads=loads,
         purlins=purlins,
         bracing=bracing,
+        accessories=accessories,
     )
 
     typer.echo(f"Neige prise en compte: {report.loads.snow_kN_m2:.2f} kN/m²")

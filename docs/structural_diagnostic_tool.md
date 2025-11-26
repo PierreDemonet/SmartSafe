@@ -9,6 +9,11 @@ De nombreux hangars agricoles construits avant les années 2000 ne sont pas dime
 - Le programme calcule automatiquement les charges réglementaires, estime les efforts dans le portique 2D, vérifie chaque élément selon l’Eurocode approprié (acier EC3 ou bois EC5) et affiche un verdict « GO / NO GO ».
 - En cas de NO GO, il propose des renforts simples et réalistes pour ce type de hangar (pannes supplémentaires, bracons, poteaux/butons, doublage de profilés) et produit un rapport PDF structuré avec hypothèses, résultats et recommandations.
 
+### Extensions géométriques couvertes par le prototype
+- Poteaux intermédiaires pour découper la portée principale et recalculer la flexion des arbalétriers.
+- Appentis mono-pente rattaché (portée, pente et hauteur d’égout dédiées) avec vérification des poutres et poteaux d’appentis.
+- Jarrets/bracons activables pour réduire le moment au noeud poteau-poutre (facteur de réduction configurable) et bracons/knee-braces pour diminuer le moment de vent dans les poteaux.
+
 ### Objectifs principaux
 - Configurer la géométrie et la structure (dimensions, type de portique, matériaux) ainsi que les charges (neige, vent, surcharge utilisateur).
 - Vérifier la capacité à supporter une surcharge additionnelle (ex. remplacement d’une couverture fibrociment par bac acier + panneaux PV) en respectant Eurocode 1 (actions), Eurocode 3 (acier) et Eurocode 5 (bois).

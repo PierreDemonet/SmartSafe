@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import ceil, cos, radians
 from pathlib import Path
-from typing import Dict, List, Literal, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 
 
 RoofType = Literal["double", "mono"]
@@ -26,16 +26,34 @@ class GeometryConfig:
     roof_pitch_deg: float
     roof_type: RoofType = "double"
     eave_height_m: float = 4.0
+    intermediate_columns: int = 0
+    lean_to_span_m: float | None = None
+    lean_to_pitch_deg: float | None = None
+    lean_to_eave_height_m: float | None = None
 
     @property
     def rafter_length_m(self) -> float:
         """Return the length of one rafter (half-span) along the slope."""
-        half_span = self.span_m / 2.0
+        half_span = self.effective_main_half_span
         return half_span / cos(radians(self.roof_pitch_deg))
+
+    @property
+    def effective_main_half_span(self) -> float:
+        """Take intermediate columns into account when splitting the span."""
+
+        splits = max(1, self.intermediate_columns + 1)
+        return self.span_m / (2.0 * splits)
 
     @property
     def bay_count(self) -> int:
         return max(1, int(round(self.length_m / self.bay_spacing_m)))
+
+    @property
+    def lean_to_rafter_length_m(self) -> float:
+        if self.lean_to_span_m is None:
+            raise ValueError("lean_to_span_m must be set to compute lean-to length")
+        pitch = self.lean_to_pitch_deg if self.lean_to_pitch_deg is not None else self.roof_pitch_deg
+        return self.lean_to_span_m / cos(radians(pitch))
 
 
 @dataclass
@@ -102,6 +120,8 @@ class DiagnosticReport:
     column: ElementResult
     purlin: ElementResult
     bracing: ElementResult
+    lean_to_rafter: ElementResult | None
+    lean_to_column: ElementResult | None
     reinforcements: List[str]
 
 
@@ -140,6 +160,16 @@ class BracingConfig:
     section: str = "UPN160"
     material: str = "S275"
     panel_width_m: float = 6.0
+
+
+@dataclass
+class FrameAccessories:
+    """Optional geometry helpers (jarrets/haunches, bracons)."""
+
+    haunch: bool = False
+    haunch_factor: float = 0.85
+    knee_braces: bool = False
+    knee_brace_factor: float = 0.75
 
 
 def calculer_charge_neige(zone: str, altitude_m: float, pente_deg: float, type_toit: RoofType) -> float:
@@ -229,12 +259,14 @@ def run_diagnostic(
     loads: LoadConfig | None = None,
     purlins: PurlinConfig | None = None,
     bracing: BracingConfig | None = None,
+    accessories: FrameAccessories | None = None,
 ) -> DiagnosticReport:
     """Run a quick structural check and propose reinforcements when needed."""
 
     loads = loads or LoadConfig()
     purlins = purlins or PurlinConfig()
     bracing = bracing or BracingConfig(panel_width_m=geom.bay_spacing_m)
+    accessories = accessories or FrameAccessories()
 
     snow = calculer_charge_neige(loads.zone_neige, loads.altitude_m, geom.roof_pitch_deg, geom.roof_type)
     wind = calculer_charge_vent(loads.zone_vent, geom.eave_height_m, geom.span_m, geom.length_m, geom.roof_type)
@@ -255,6 +287,8 @@ def run_diagnostic(
     q_line = max(q_snow, q_wind_vertical) * geom.bay_spacing_m
     l_rafter = geom.rafter_length_m
     m_max = q_line * l_rafter**2 / 8.0
+    if accessories.haunch:
+        m_max *= accessories.haunch_factor
     m_cap = _moment_capacity_kNm(rafter_section, rafter_mat)
     rafter_util = _utilization((m_max,), (m_cap,))
     rafter_res = ElementResult(
@@ -268,9 +302,11 @@ def run_diagnostic(
     # Column check: axial from vertical loads + bending from wind
     column_section, column_mat = _lookup(sections["column"], materials.get("column", materials.get("frame", "S275")))
     q_vertical_total = max(q_snow, q_wind_vertical) * geom.span_m * geom.bay_spacing_m
-    n_column = q_vertical_total / 2.0  # share between two columns of the frame
+    n_column = q_vertical_total / (2.0 + geom.intermediate_columns)  # share between main columns and intermediate supports
     shear_wind = wind_horizontal * geom.eave_height_m * geom.bay_spacing_m
     m_wind = shear_wind * geom.eave_height_m / 2.0
+    if accessories.knee_braces:
+        m_wind *= accessories.knee_brace_factor
     m_column_cap = _moment_capacity_kNm(column_section, column_mat)
     n_cap = _axial_capacity_kN(column_section, column_mat)
     column_util = _utilization((n_column, m_wind), (n_cap, m_column_cap))
@@ -310,9 +346,57 @@ def run_diagnostic(
         note="Effort de traction supposé dans une jambe de contreventement.",
     )
 
-    max_util = max(rafter_util, column_util, purlin_util, bracing_util)
+    lean_to_rafter_res: ElementResult | None = None
+    lean_to_column_res: ElementResult | None = None
+    if geom.lean_to_span_m:
+        lt_pitch = geom.lean_to_pitch_deg if geom.lean_to_pitch_deg is not None else geom.roof_pitch_deg
+        lt_rafter_section, lt_rafter_mat = _lookup(
+            sections.get("lean_to_rafter", sections["rafter"]), materials.get("lean_to", materials.get("frame", "S275"))
+        )
+        q_line_lt = max(q_snow, q_wind_vertical) * geom.bay_spacing_m
+        l_lt = geom.lean_to_rafter_length_m
+        m_lt = q_line_lt * l_lt**2 / 8.0
+        if accessories.haunch:
+            m_lt *= accessories.haunch_factor
+        m_lt_cap = _moment_capacity_kNm(lt_rafter_section, lt_rafter_mat)
+        lt_util = _utilization((m_lt,), (m_lt_cap,))
+        lean_to_rafter_res = ElementResult(
+            name="poutre appentis",
+            utilization=lt_util,
+            applied=(m_lt,),
+            capacity=(m_lt_cap,),
+            note=f"Appentis mono-pente {lt_pitch:.1f}° sur portée {geom.lean_to_span_m:.2f} m.",
+        )
+
+        lt_col_section, lt_col_mat = _lookup(
+            sections.get("lean_to_column", sections.get("column", sections["rafter"])),
+            materials.get("lean_to", materials.get("frame", "S275")),
+        )
+        lt_eave = geom.lean_to_eave_height_m if geom.lean_to_eave_height_m is not None else geom.eave_height_m
+        q_lt = max(q_snow, q_wind_vertical) * geom.lean_to_span_m * geom.bay_spacing_m
+        n_lt = q_lt / 2.0
+        m_lt_col = wind_horizontal * lt_eave * geom.bay_spacing_m * lt_eave / 2.0
+        if accessories.knee_braces:
+            m_lt_col *= accessories.knee_brace_factor
+        m_lt_col_cap = _moment_capacity_kNm(lt_col_section, lt_col_mat)
+        n_lt_cap = _axial_capacity_kN(lt_col_section, lt_col_mat)
+        lt_col_util = _utilization((n_lt, m_lt_col), (n_lt_cap, m_lt_col_cap))
+        lean_to_column_res = ElementResult(
+            name="poteau appentis",
+            utilization=lt_col_util,
+            applied=(n_lt, m_lt_col),
+            capacity=(n_lt_cap, m_lt_col_cap),
+            note="Poteau de rive d'appentis (flexion + compression).",
+        )
+
+    utilizations = [rafter_util, column_util, purlin_util, bracing_util]
+    if lean_to_rafter_res:
+        utilizations.append(lean_to_rafter_res.utilization)
+    if lean_to_column_res:
+        utilizations.append(lean_to_column_res.utilization)
+    max_util = max(utilizations)
     status = "GO" if max_util <= 1.0 else "NO GO"
-    reinforcements = determine_renforts(rafter_res, column_res, purlin_res, bracing_res)
+    reinforcements = determine_renforts(rafter_res, column_res, purlin_res, bracing_res, lean_to_rafter_res, lean_to_column_res, geom)
 
     return DiagnosticReport(
         status=status,
@@ -321,12 +405,20 @@ def run_diagnostic(
         column=column_res,
         purlin=purlin_res,
         bracing=bracing_res,
+        lean_to_rafter=lean_to_rafter_res,
+        lean_to_column=lean_to_column_res,
         reinforcements=reinforcements,
     )
 
 
 def determine_renforts(
-    rafter: ElementResult, column: ElementResult, purlin: ElementResult, bracing: ElementResult
+    rafter: ElementResult,
+    column: ElementResult,
+    purlin: ElementResult,
+    bracing: ElementResult,
+    lean_to_rafter: ElementResult | None,
+    lean_to_column: ElementResult | None,
+    geom: GeometryConfig,
 ) -> List[str]:
     """Suggest typical reinforcements based on governing utilizations."""
 
@@ -334,20 +426,28 @@ def determine_renforts(
     if rafter.utilization > 1.0:
         surplus = rafter.utilization - 1.0
         suggestions.append(
-            f"Doubler les arbalétriers (profil additionnel type IPE ou UPN) pour gagner ~{surplus*100:.0f}% de marge."
+            f"Doubler les arbalétriers (profil additionnel type IPE ou UPN) pour gagner ~{surplus*100:.0f}% de marge; sinon prévoir un jarret soudé/platine pour réduire le moment en pied d'arbalétrier."
         )
     if column.utilization > 1.0:
         suggestions.append(
-            "Ajouter des butons ou poteaux intermédiaires pour réduire la longueur de flambement et reprendre le moment de vent."
+            "Ajouter des butons, bracons ou poteaux intermédiaires pour réduire la longueur de flambement et reprendre le moment de vent; un jarret en pied peut soulager le noeud poteau-poutre."
         )
+    if geom.intermediate_columns == 0 and column.utilization > 0.9:
+        suggestions.append("Étudier l'ajout d'un poteau intermédiaire pour diviser la portée principale et soulager les poteaux actuels.")
     if purlin.utilization > 1.0:
         suggestions.append(
-            "Rajouter des pannes intermédiaires ou jumeler les pannes existantes afin de diviser la portée sur toiture."
+            "Rajouter des pannes intermédiaires, jumeler les pannes existantes ou ajouter des écharpes/bracons de panne pour stabiliser le versant."
         )
     if bracing.utilization > 1.0:
         suggestions.append(
-            "Renforcer les contreventements (section plus forte ou double croix) pour reprendre les efforts horizontaux."
+            "Renforcer les contreventements (section plus forte, double croix) ou ajouter des tirants longitudinaux pour le vent."
         )
+    if lean_to_rafter and lean_to_rafter.utilization > 1.0:
+        suggestions.append(
+            "Augmenter la section des poutres d'appentis ou ajouter un poteau intermédiaire de rive pour réduire la portée en appentis."
+        )
+    if lean_to_column and lean_to_column.utilization > 1.0:
+        suggestions.append("Prévoir un contreventement ou un buton dédié pour les poteaux d'appentis soumis au vent.")
     if not suggestions:
         suggestions.append("Aucun renfort requis sur la base des hypothèses simplifiées.")
     return suggestions
@@ -433,6 +533,10 @@ def generate_pdf_report(report: DiagnosticReport, output: Path) -> Path:
     _element_block("Poteau", report.column)
     _element_block("Pannes", report.purlin)
     _element_block("Contreventements", report.bracing)
+    if report.lean_to_rafter:
+        _element_block("Poutre d'appentis", report.lean_to_rafter)
+    if report.lean_to_column:
+        _element_block("Poteau d'appentis", report.lean_to_column)
 
     pdf.add("Renforts proposés", size=12)
     for renfort in report.reinforcements:

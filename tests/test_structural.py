@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from pvai.structural.diagnostic import (
+    FrameAccessories,
     GeometryConfig,
     LoadConfig,
     PurlinConfig,
@@ -60,3 +61,54 @@ def test_pdf_report_creation(tmp_path: Path):
     pdf_path = tmp_path / "rapport.pdf"
     output = generate_pdf_report(report, pdf_path)
     assert output.exists()
+
+
+def test_intermediate_columns_relieve_main_rafter():
+    base_geom = GeometryConfig(span_m=18, bay_spacing_m=6, length_m=18, roof_pitch_deg=12)
+    reinforced_geom = GeometryConfig(span_m=18, bay_spacing_m=6, length_m=18, roof_pitch_deg=12, intermediate_columns=1)
+    base = run_diagnostic(
+        base_geom,
+        sections={"rafter": "IPE200", "column": "HEA160"},
+        materials={"frame": "S355"},
+    )
+    with_support = run_diagnostic(
+        reinforced_geom,
+        sections={"rafter": "IPE200", "column": "HEA160"},
+        materials={"frame": "S355"},
+    )
+    assert with_support.rafter.utilization < base.rafter.utilization
+
+
+def test_knee_braces_reduce_column_moment():
+    geom = GeometryConfig(span_m=12, bay_spacing_m=6, length_m=18, roof_pitch_deg=12)
+    baseline = run_diagnostic(
+        geom,
+        sections={"rafter": "IPE200", "column": "HEA160"},
+        materials={"frame": "S275"},
+    )
+    braced = run_diagnostic(
+        geom,
+        sections={"rafter": "IPE200", "column": "HEA160"},
+        materials={"frame": "S275"},
+        accessories=FrameAccessories(knee_braces=True),
+    )
+    assert braced.column.utilization < baseline.column.utilization
+
+
+def test_lean_to_is_reported():
+    geom = GeometryConfig(
+        span_m=12,
+        bay_spacing_m=6,
+        length_m=18,
+        roof_pitch_deg=12,
+        lean_to_span_m=4.0,
+        lean_to_pitch_deg=8.0,
+        lean_to_eave_height_m=3.5,
+    )
+    report = run_diagnostic(
+        geom,
+        sections={"rafter": "IPE200", "column": "HEA160", "lean_to_rafter": "IPE180", "lean_to_column": "HEA160"},
+        materials={"frame": "S275"},
+    )
+    assert report.lean_to_rafter is not None
+    assert report.lean_to_column is not None
