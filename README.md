@@ -45,7 +45,9 @@ Run a simplified structural diagnostic for an agricultural hangar:
 ```bash
 pvai diag --span 12 --bay-spacing 6 --length 18 --roof-pitch 12 \
   --zone-neige A2 --zone-vent 1 --altitude 200 \
-  --rafter-section IPE200 --column-section HEA160 --frame-material S275
+  --rafter-section IPE200 --column-section HEA160 --frame-material S275 \
+  --purlin-section Z200 --purlin-spacing 1.5 --bracing-section UPN160 \
+  --pdf-report out/rapport_structure.pdf
 ```
 
-The command prints the snow and wind loads considered, utilization of rafters and columns, the GO/NO GO verdict, and suggested reinforcements when necessary.
+The command prints the snow and wind loads considered, utilization of rafters/columns/purlins/brace bays, the GO/NO GO verdict, suggested reinforcements, and can export a PDF summary.

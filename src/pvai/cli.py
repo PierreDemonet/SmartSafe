@@ -17,7 +17,14 @@ from pvai.pv.sim import SimulationOutputs, simulate_hourly
 from pvai.export.dxf import export_dxf
 from pvai.export.pdf import export_pdf
 from pvai.export.xlsx import export_bom
-from pvai.structural.diagnostic import GeometryConfig, LoadConfig, run_diagnostic
+from pvai.structural.diagnostic import (
+    BracingConfig,
+    GeometryConfig,
+    LoadConfig,
+    PurlinConfig,
+    generate_pdf_report,
+    run_diagnostic,
+)
 
 try:
     from pvrtx.core.engine import PVRTX
@@ -168,7 +175,11 @@ def diag(span: float = typer.Option(12.0, help="Portée du portique (m)"),
          roof_weight: float = typer.Option(0.10, help="Poids propre de la couverture (kN/m²)"),
          rafter_section: str = typer.Option("IPE200", help="Section des arbalétriers"),
          column_section: str = typer.Option("HEA160", help="Section des poteaux"),
-         frame_material: str = typer.Option("S275", help="Matériau principal (S275, S355, GL24)")):
+         frame_material: str = typer.Option("S275", help="Matériau principal (S275, S355, GL24)"),
+         purlin_section: str = typer.Option("Z200", help="Section des pannes"),
+         purlin_spacing: float = typer.Option(1.5, help="Entraxe des pannes (m)"),
+         bracing_section: str = typer.Option("UPN160", help="Section de contreventement"),
+         pdf_report: Optional[Path] = typer.Option(None, help="Chemin du rapport PDF")):
     """Diagnostic rapide GO/NO GO pour un hangar agricole standard."""
 
     geom = GeometryConfig(
@@ -186,25 +197,41 @@ def diag(span: float = typer.Option(12.0, help="Portée du portique (m)"),
         additional_permanent_kN_m2=surcharge,
         roof_self_weight_kN_m2=roof_weight,
     )
+    purlins = PurlinConfig(section=purlin_section, spacing_m=purlin_spacing)
+    bracing = BracingConfig(section=bracing_section, panel_width_m=bay_spacing)
 
     report = run_diagnostic(
         geom,
         sections={"rafter": rafter_section, "column": column_section},
         materials={"frame": frame_material},
         loads=loads,
+        purlins=purlins,
+        bracing=bracing,
     )
 
-    typer.echo(f"Neige prise en compte: {report.snow_load_kN_m2:.2f} kN/m²")
-    typer.echo(f"Pression de vent: {report.wind_pressure_kN_m2:.2f} kN/m²")
-    typer.echo(f"Poutre - Mmax: {report.rafter.applied[0]:.2f} kN·m / MRd {report.rafter.capacity[0]:.2f} kN·m -> utilisation {report.rafter.utilization*100:.1f}%")
+    typer.echo(f"Neige prise en compte: {report.loads.snow_kN_m2:.2f} kN/m²")
+    typer.echo(f"Pression de vent: {report.loads.wind_pressure_kN_m2:.2f} kN/m²")
+    typer.echo(
+        f"Poutre - Mmax: {report.rafter.applied[0]:.2f} kN·m / MRd {report.rafter.capacity[0]:.2f} kN·m -> utilisation {report.rafter.utilization*100:.1f}%"
+    )
     typer.echo(
         f"Poteau - N: {report.column.applied[0]:.2f} kN, M: {report.column.applied[1]:.2f} kN·m / "
         f"NRd {report.column.capacity[0]:.2f} kN, MRd {report.column.capacity[1]:.2f} kN·m -> utilisation {report.column.utilization*100:.1f}%"
+    )
+    typer.echo(
+        f"Pannes - Mmax: {report.purlin.applied[0]:.2f} kN·m / MRd {report.purlin.capacity[0]:.2f} kN·m -> utilisation {report.purlin.utilization*100:.1f}%"
+    )
+    typer.echo(
+        f"Contreventement - N: {report.bracing.applied[0]:.2f} kN / NRd {report.bracing.capacity[0]:.2f} kN -> utilisation {report.bracing.utilization*100:.1f}%"
     )
     typer.echo(f"Verdict: {report.status}")
     typer.echo("Renforts suggérés:")
     for opt in report.reinforcements:
         typer.echo(f"- {opt}")
+
+    if pdf_report:
+        generate_pdf_report(report, pdf_report)
+        typer.echo(f"Rapport PDF écrit: {pdf_report}")
 
 
 if __name__ == "__main__":
