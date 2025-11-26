@@ -37,3 +37,18 @@ pvai export --layout out/layout.geojson --params examples/data/params.yaml \
 ```
 
 To exercise the shading engine without a GPU, use `--rtx-plugin dummy` for simulation.
+
+## Quick structural GO/NO GO check (prototype)
+
+Run a simplified structural diagnostic for an agricultural hangar:
+
+```bash
+pvai diag --span 12 --bay-spacing 6 --length 18 --roof-pitch 12 \
+  --zone-neige A2 --zone-vent 1 --altitude 200 \
+  --rafter-section IPE200 --column-section HEA160 --frame-material S275 \
+  --purlin-section Z200 --purlin-spacing 1.5 --bracing-section UPN160 \
+  --intermediate-columns 1 --lean-to-span 4 --lean-to-pitch 8 --knee-braces \
+  --pdf-report out/rapport_structure.pdf
+```
+
+The command prints the snow and wind loads considered, utilization of rafters/columns/purlins/brace bays (and lean-to members), the GO/NO GO verdict, suggested reinforcements (poteaux intermédiaires, jarrets/bracons, appentis) and can export a PDF summary.
